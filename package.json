@@ -1,0 +1,28 @@
+{
+  "name": "kitazawagosho",
+  "version": "1.1.0",
+  "description": "Environment of Kitazawa-gosho",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ble",
+    "bluetooth",
+    "illuminance",
+    "sensor",
+    "IoT",
+    "netatmo"
+  ],
+  "author": "siyo",
+  "license": "MIT",
+  "dependencies": {
+    "bravia": "^1.2.0",
+    "lodash": "^4.17.11",
+    "netatmo": "^2.2.2",
+    "noble": "1.9.1",
+    "npmlog": "^4.1.2",
+    "raspicam": "^0.2.14",
+    "twitter": "^1.7.1"
+  }
+}
