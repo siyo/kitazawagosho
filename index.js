@@ -138,6 +138,10 @@ class App {
     this._getNetatomoStationData()
       .then(status => {
         this.netatmoStatus = status;
+      }).catch(err => {
+        this.netatmoStatus = err.message;
+        log.error(TAG, '%j', err);
+      }).then(() => {
         setTimeout(() => {
           this.startNetatmoMonitor();
         }, NETATOMO_INTERVAL);
@@ -145,14 +149,19 @@ class App {
   }
 
   startBraviaMonitor() {
+    let braviaStatus = '📺 ';
+
     this._getBraviaStatus()
       .then(status => {
-        status = '📺 ' + status;
-        if (this.braviaStatus !== status ) {
-          this.braviaStatus = status;
+        braviaStatus += status;
+      }).catch(err => {
+        braviaStatus += err.message;
+        log.error(TAG, '%j', err);
+      }).then(() => {
+        if (this.braviaStatus !== braviaStatus ) {
+          this.braviaStatus = braviaStatus;
           this._tweet(`${this.netatmoStatus} ${this.braviaStatus}`);
         }
-
         setTimeout(() => {
           this.startBraviaMonitor();
         }, BRAVIA_INTERVAL);
