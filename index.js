@@ -39,7 +39,7 @@ const config = require('./config.json');
 
 const TAG = path.basename(__filename);
 const BRAVIA_INTERVAL = 60 * 1000; // msec
-const NETATOMO_INTERVAL = 5 * 60 * 1000; // msec
+const NETATMO_INTERVAL = 333 * 1000; // msec
 const CAM_INTERVAL = 15 * 60 * 1000; // msec
 
 const IMG_DIR = '/tmp';
@@ -77,9 +77,9 @@ class App {
     });
 
     noble.on('discover', (peripheral) => {
-      var name = peripheral.advertisement.localName,
-          data = peripheral.advertisement.manufacturerData;
-      var val;
+      const name = peripheral.advertisement.localName;
+      const data = peripheral.advertisement.manufacturerData;
+      let val;
 
       log.verbose(TAG, 'peripheral.advertisement:%j', peripheral.advertisement);
 
@@ -89,7 +89,7 @@ class App {
       val = data.readUInt8(5) * 256 + data.readUInt8(4);
       this.luxes.push(val);
 
-      log.info(TAG, 'MEASURE: %s %d', name, val);
+      log.verbose(TAG, 'MEASURE: %s %d', name, val);
     });
 
     this.cam.on('start', () => {
@@ -105,67 +105,48 @@ class App {
     });
 
     this.cam.on('read', (err, timestamp, filename) => {
-      if (err) {
-        log.error(TAG, err);
-      } else {
-        log.info(TAG, 'cam saved: %s (%d)', filename, timestamp );
-      }
-      if (filename !== IMG_FILENAME)
-        return;
-
-      const status = `${this.netatmoStatus} ${this.braviaStatus}`;
-      const data = fs.readFileSync(IMG_PATH);
-      this.twitter.post('media/upload', {media: data}, (error, media) => {
-        let media_ids;
-
-        if (error)
-          status += '📸 Cam error!';
-        else
-          media_ids = media.media_id_string;
-
-        this._tweet(status, media_ids);
-      });
-      setTimeout(() => this.cam.start(), CAM_INTERVAL);
+      this._onCameraRead(err, timestamp, filename);
     });
 
     log.info(TAG, '=== Start ===');
-    this.startNetatmoMonitor();
-    this.startBraviaMonitor();
+    this.updateNetatmoStatus()
+      .then(() => setInterval(() => this.updateNetatmoStatus(), NETATMO_INTERVAL));
+    this.updateBraviaStatus()
+      .then(() => setInterval(() => this.updateBraviaStatus(), BRAVIA_INTERVAL));
     this.cam.start();
   }
 
-  startNetatmoMonitor () {
-    this._getNetatomoStationData()
-      .then(status => {
+  async updateNetatmoStatus () {
+    try {
+      const status = await this._getNetatmoStationData();
+      if (this.netatmoStatus !== status) {
         this.netatmoStatus = status;
-      }).catch(err => {
-        this.netatmoStatus = err.message;
-        log.error(TAG, '%j', err);
-      }).then(() => {
-        setTimeout(() => {
-          this.startNetatmoMonitor();
-        }, NETATOMO_INTERVAL);
-      });
+        this._tweet(`${this.netatmoStatus} ${this.braviaStatus}`);
+      }
+    } catch(err) {
+      this.netatmoStatus = err.message;
+      log.error(TAG, err.message);
+    }
   }
 
-  startBraviaMonitor() {
+  async updateBraviaStatus () {
     let braviaStatus = '📺 ';
+    try {
+      const status = await this._getBraviaStatus();
+      braviaStatus += status;
+    } catch(err) {
+      braviaStatus += err.message;
+      log.error(TAG, '%j', err);
+    }
+    if (this.braviaStatus === braviaStatus )
+      return;
 
-    this._getBraviaStatus()
-      .then(status => {
-        braviaStatus += status;
-      }).catch(err => {
-        braviaStatus += err.message;
-        log.error(TAG, '%j', err);
-      }).then(() => {
-        if (this.braviaStatus !== braviaStatus ) {
-          this.braviaStatus = braviaStatus;
-          this._tweet(`${this.netatmoStatus} ${this.braviaStatus}`);
-        }
-        setTimeout(() => {
-          this.startBraviaMonitor();
-        }, BRAVIA_INTERVAL);
-      });
+    this.braviaStatus = braviaStatus;
+    try {
+      await this._tweet(`${this.netatmoStatus} ${this.braviaStatus}`);
+    } catch(err) {
+      log.error(TAG, '%j', err);
+    }
   }
 
   parseNetatmoDevice (device) {
@@ -190,7 +171,34 @@ class App {
     return status;
   }
 
-  _tweet(status, media_ids) {
+  async _onCameraRead (err, timestamp, filename) {
+    if (err) {
+      log.error(TAG, err);
+    } else {
+      log.info(TAG, 'cam saved: %s (%d)', filename, timestamp );
+    }
+    if (filename !== IMG_FILENAME)
+      return;
+
+    let status = `${this.netatmoStatus} ${this.braviaStatus}`;
+    let media_ids;
+    try {
+      const data = fs.readFileSync(IMG_PATH);
+      const media = await this.twitter.post('media/upload', {media: data});
+      media_ids = media.media_id_string;
+    } catch (err) {
+      status += '📸' + err.message;
+      log.error(TAG, err.message);
+    }
+    try {
+      await this._tweet(status, media_ids);
+    } catch (err) {
+      log.error(TAG, err.message);
+    }
+    setTimeout(() => this.cam.start(), CAM_INTERVAL);
+  }
+
+  async _tweet(status, media_ids) {
     const st = {
       status: status + ' ⏰ ' + parseInt(_.now() / 1000) + 'UTC'
     };
@@ -198,15 +206,11 @@ class App {
     if (media_ids)
       st.media_ids = media_ids;
 
-    this.twitter.post('statuses/update', st, (error) => {
-      if(error)
-        log.error(TAG, 'Error: %j', error);
-      else
-        log.info(TAG, 'POST: %j', st);
-    });
+    await this.twitter.post('statuses/update', st);
+    log.info(TAG, 'POST: %j', st);
   }
 
-  _getNetatomoStationData () {
+  async _getNetatmoStationData () {
     return new Promise((resolve) => {
       this.netatmo.getStationsData((err, devices) => {
         let status = this._calcLux();
@@ -220,24 +224,22 @@ class App {
     });
   }
 
-  _getBraviaStatus () {
-    return this.bravia.system.invoke('getPowerStatus')
-      .then(info => {
-        if (info.status == 'active')  {
-          return this.bravia.avContent.invoke('getPlayingContentInfo')
-            .then(info => {
-              let status = info.title;
-              if (info.programTitle)
-                status += ': ' + info.programTitle.replace(INVALID_TEXT_REGEXP, '');
-              return status;
-            });
-        } else  {
-          return Promise.resolve(info.status);
-        }
-      }).catch(err => {
-        log.warn(TAG, 'Bravia err' + err);
-        return '?';
-      });
+  async _getBraviaStatus () {
+    try {
+      const power = await this.bravia.system.invoke('getPowerStatus');
+      if (power.status == 'active')  {
+        const info = await this.bravia.avContent.invoke('getPlayingContentInfo');
+        let status = info.title;
+        if (info.programTitle)
+          status += ': ' + info.programTitle.replace(INVALID_TEXT_REGEXP, '');
+        return status;
+      } else  {
+        return power.status;
+      }
+    }catch(err) {
+      log.warn(TAG, 'Bravia err' + err);
+      return '?';
+    }
   }
 
   _calcLux ()  {
