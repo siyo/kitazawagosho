@@ -24,5 +24,9 @@
     "npmlog": "^4.1.2",
     "raspicam": "^0.2.14",
     "twitter": "^1.7.1"
+  },
+  "devDependencies": {
+    "eslint": "^5.16.0",
+    "standard": "^12.0.1"
   }
 }
