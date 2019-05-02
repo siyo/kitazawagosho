@@ -226,11 +226,17 @@ class App {
       const power = await this.bravia.system.invoke('getPowerStatus')
       if (power.status === 'active') {
         const info = await this.bravia.avContent.invoke('getPlayingContentInfo')
-        let status = info.title
+        const status = info.title
         if (info.programTitle) {
-          status += ': ' + info.programTitle.replace(INVALID_TEXT_REGEXP, '')
+          return status + ': ' + info.programTitle.replace(INVALID_TEXT_REGEXP, '')
+        } else {
+          return status === 'HDMI1/MHL' ? 'YouTube'
+            : status === 'HDMI2' ? 'Macbook'
+              : status === 'HDMI3' ? 'PrimeVideo/Netflix'
+                : status === 'HDMI4' ? 'Nintendo Switch'
+                  : status === '?' ? '録画'
+                    : status
         }
-        return status
       } else {
         return power.status
       }
